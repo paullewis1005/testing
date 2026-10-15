@@ -52,7 +52,6 @@
             const bytes = new Uint8Array(buf.slice(0, 4));
             const sig = String.fromCharCode(...bytes);
 
-            // Detect SWF magic bytes (FWS, CWS, ZWS)
             if (sig.startsWith('FWS') || sig.startsWith('CWS') || sig.startsWith('ZWS')) {
                 await loadScript(RUFFLE_URL);
                 const ruffle = window.RufflePlayer.newest();
@@ -60,9 +59,7 @@
                 player.style.cssText = 'width:100%;height:100%;';
                 container.appendChild(player);
                 player.load({ data: buf });
-            } 
-            // Detect ZIP magic bytes (PK)
-            else if (sig.startsWith('PK')) {
+            } else if (sig.startsWith('PK')) {
                 await loadScript(JSZIP_URL);
                 const zip = await window.JSZip.loadAsync(buf);
                 const blobMap = {};
@@ -89,9 +86,7 @@
                 iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
                 iframe.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
                 container.appendChild(iframe);
-            } 
-            // Fallback to raw HTML
-            else {
+            } else {
                 const iframe = document.createElement('iframe');
                 iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
                 iframe.src = URL.createObjectURL(new Blob([buf], { type: 'text/html' }));
@@ -136,7 +131,17 @@
             };
 
             targetBar.prepend(btn);
-        } catch (e) {}
+
+            detailPage.querySelectorAll('.btnPlay').forEach((nativeBtn) => {
+                nativeBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    launchGame(downloadUrl, item.Name);
+                };
+            });
+        } catch (e) {
+            console.error('[FlashFin]', e);
+        }
     }
 
     setInterval(injectButton, 700);
