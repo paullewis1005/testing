@@ -1,5 +1,6 @@
 (function () {
     'use strict';
+    console.log('[FlashFin] Script loaded!');
 
     const RUFFLE_URL = 'https://unpkg.com/@ruffle-rs/ruffle';
     const JSZIP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
@@ -43,69 +44,70 @@
         return content;
     }
 
-    async function launchFlash(url, title) {
+    async function launchGame(url, title) {
         const container = createOverlay(title);
-        await loadScript(RUFFLE_URL);
-        const ruffle = window.RufflePlayer.newest();
-        const player = ruffle.createPlayer();
-        player.style.cssText = 'width:100%;height:100%;';
-        container.appendChild(player);
-        player.load(url);
-    }
+        try {
+            const res = await fetch(url);
+            const buf = await res.arrayBuffer();
+            const bytes = new Uint8Array(buf.slice(0, 4));
+            const sig = String.fromCharCode(...bytes);
 
-    async function launchHtml(url, title) {
-        const container = createOverlay(title);
-        const res = await fetch(url);
-        const html = await res.text();
-        const blob = new Blob([html], { type: 'text/html' });
-        const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
-        iframe.src = URL.createObjectURL(blob);
-        container.appendChild(iframe);
-    }
+            // Detect SWF magic bytes (FWS, CWS, ZWS)
+            if (sig.startsWith('FWS') || sig.startsWith('CWS') || sig.startsWith('ZWS')) {
+                await loadScript(RUFFLE_URL);
+                const ruffle = window.RufflePlayer.newest();
+                const player = ruffle.createPlayer();
+                player.style.cssText = 'width:100%;height:100%;';
+                container.appendChild(player);
+                player.load({ data: buf });
+            } 
+            // Detect ZIP magic bytes (PK)
+            else if (sig.startsWith('PK')) {
+                await loadScript(JSZIP_URL);
+                const zip = await window.JSZip.loadAsync(buf);
+                const blobMap = {};
+                let indexFile = null;
 
-    async function launchZipHtml(url, title) {
-        const container = createOverlay(title + ' (Loading...)');
-        await loadScript(JSZIP_URL);
-        const res = await fetch(url);
-        const buf = await res.arrayBuffer();
-        const zip = await window.JSZip.loadAsync(buf);
+                for (const [path, file] of Object.entries(zip.files)) {
+                    if (file.dir) continue;
+                    const ext = path.split('.').pop().toLowerCase();
+                    const mime = { html: 'text/html', js: 'text/javascript', css: 'text/css', png: 'image/png', jpg: 'image/jpeg', wasm: 'application/wasm', mp3: 'audio/mpeg', ogg: 'audio/ogg', json: 'application/json' }[ext] || 'application/octet-stream';
+                    const blob = await file.async('blob');
+                    blobMap[path] = URL.createObjectURL(new Blob([blob], { type: mime }));
+                    if (path.endsWith('index.html') && (!indexFile || path.length < indexFile.length)) {
+                        indexFile = path;
+                    }
+                }
 
-        const blobMap = {};
-        let indexFile = null;
+                let html = await zip.file(indexFile).async('string');
+                for (const [path, blobUrl] of Object.entries(blobMap)) {
+                    const cleanPath = path.replace(/^.*?\//, '');
+                    html = html.split(path).join(blobUrl).split(cleanPath).join(blobUrl);
+                }
 
-        for (const [path, file] of Object.entries(zip.files)) {
-            if (file.dir) continue;
-            const ext = path.split('.').pop().toLowerCase();
-            const mime = { html: 'text/html', js: 'text/javascript', css: 'text/css', png: 'image/png', jpg: 'image/jpeg', wasm: 'application/wasm', mp3: 'audio/mpeg', ogg: 'audio/ogg', json: 'application/json' }[ext] || 'application/octet-stream';
-            const blob = await file.async('blob');
-            blobMap[path] = URL.createObjectURL(new Blob([blob], { type: mime }));
-            if (path.endsWith('index.html') && (!indexFile || path.length < indexFile.length)) {
-                indexFile = path;
+                const iframe = document.createElement('iframe');
+                iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
+                iframe.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                container.appendChild(iframe);
+            } 
+            // Fallback to raw HTML
+            else {
+                const iframe = document.createElement('iframe');
+                iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
+                iframe.src = URL.createObjectURL(new Blob([buf], { type: 'text/html' }));
+                container.appendChild(iframe);
             }
+        } catch (err) {
+            container.innerHTML = `<p style="color:#fff;padding:20px;">Error loading game: ${err.message}</p>`;
         }
-
-        if (!indexFile) {
-            container.innerHTML = '<p style="color:#fff;padding:20px;">Error: No index.html found in archive.</p>';
-            return;
-        }
-
-        let html = await zip.file(indexFile).async('string');
-        for (const [path, blobUrl] of Object.entries(blobMap)) {
-            const cleanPath = path.replace(/^.*?\//, '');
-            html = html.split(path).join(blobUrl).split(cleanPath).join(blobUrl);
-        }
-
-        const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
-        iframe.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-        container.innerHTML = '';
-        container.appendChild(iframe);
     }
 
-    async function checkCurrentItem() {
+    async function injectButton() {
         const match = window.location.hash.match(/id=([a-f0-9]{32})/i);
         if (!match || !window.ApiClient) return;
+
+        const detailPage = document.querySelector('#itemDetailPage:not(.hide), .itemDetailPage:not(.hide)') || document.body;
+        if (detailPage.querySelector('.flashfin-btn')) return;
 
         const itemId = match[1];
         const userId = window.ApiClient.getCurrentUserId();
@@ -115,30 +117,27 @@
             const item = await window.ApiClient.getItem(userId, itemId);
             if (!item || !item.Path) return;
 
-            const ext = item.Path.split('.').pop().toLowerCase();
-            if (!['swf', 'txt', 'html', 'zip', 'mp4', 'cbz'].includes(ext)) return;
+            const nameLower = (item.Name + ' ' + item.Path).toLowerCase();
+            if (!nameLower.includes('flash') && !nameLower.includes('html') && !['swf', 'html', 'zip', 'cbz'].includes(item.Path.split('.').pop().toLowerCase())) return;
 
-            const detailContainer = document.querySelector('.mainDetailButtons:not(.hide)');
-            if (!detailContainer || detailContainer.querySelector('.flashfin-btn')) return;
-
-            const btn = document.createElement('button');
-            btn.className = 'button-flat btnPlay detailButton emby-button flashfin-btn';
-            btn.style.cssText = 'background:#00a4dc;color:#fff;border-radius:4px;padding:8px 16px;margin-right:10px;font-weight:bold;';
-            btn.innerHTML = `<span>▶ Play ${ext === 'swf' ? 'Flash' : 'HTML5'}</span>`;
+            const targetBar = detailPage.querySelector('.mainDetailButtons, .detailPagePrimaryContainer, .itemName');
+            if (!targetBar) return;
 
             const downloadUrl = window.ApiClient.getUrl(`Items/${itemId}/Download`, { api_key: window.ApiClient.accessToken() });
 
-         btn.onclick = (e) => {
+            const btn = document.createElement('button');
+            btn.className = 'flashfin-btn';
+            btn.style.cssText = 'background:#00a4dc;color:#fff;border:none;border-radius:4px;padding:10px 20px;margin:10px 10px 10px 0;font-weight:bold;cursor:pointer;z-index:9999;font-size:15px;';
+            btn.textContent = '▶ Play Game';
+            btn.onclick = (e) => {
                 e.preventDefault();
-                e.stopPropagation(); // Stops Jellyfin's media player from launching
-                if (ext === 'swf') launchFlash(downloadUrl, item.Name);
-                else if (ext === 'html') launchHtml(downloadUrl, item.Name);
-                else launchZipHtml(downloadUrl, item.Name);
+                e.stopPropagation();
+                launchGame(downloadUrl, item.Name);
             };
 
-            detailContainer.prepend(btn);
+            targetBar.prepend(btn);
         } catch (e) {}
     }
 
-    setInterval(checkCurrentItem, 800);
+    setInterval(injectButton, 700);
 })();
