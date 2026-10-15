@@ -81,3 +81,63 @@
             const blob = await file.async('blob');
             blobMap[path] = URL.createObjectURL(new Blob([blob], { type: mime }));
             if (path.endsWith('index.html') && (!indexFile || path.length < indexFile.length)) {
+                indexFile = path;
+            }
+        }
+
+        if (!indexFile) {
+            container.innerHTML = '<p style="color:#fff;padding:20px;">Error: No index.html found in archive.</p>';
+            return;
+        }
+
+        let html = await zip.file(indexFile).async('string');
+        for (const [path, blobUrl] of Object.entries(blobMap)) {
+            const cleanPath = path.replace(/^.*?\//, '');
+            html = html.split(path).join(blobUrl).split(cleanPath).join(blobUrl);
+        }
+
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
+        iframe.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        container.innerHTML = '';
+        container.appendChild(iframe);
+    }
+
+    async function checkCurrentItem() {
+        const match = window.location.hash.match(/id=([a-f0-9]{32})/i);
+        if (!match || !window.ApiClient) return;
+
+        const itemId = match[1];
+        const userId = window.ApiClient.getCurrentUserId();
+        if (!userId) return;
+
+        try {
+            const item = await window.ApiClient.getItem(userId, itemId);
+            if (!item || !item.Path) return;
+
+            const ext = item.Path.split('.').pop().toLowerCase();
+            if (!['swf', 'html', 'zip', 'cbz'].includes(ext)) return;
+
+            const detailContainer = document.querySelector('.mainDetailButtons:not(.hide)');
+            if (!detailContainer || detailContainer.querySelector('.flashfin-btn')) return;
+
+            const btn = document.createElement('button');
+            btn.className = 'button-flat btnPlay detailButton emby-button flashfin-btn';
+            btn.style.cssText = 'background:#00a4dc;color:#fff;border-radius:4px;padding:8px 16px;margin-right:10px;font-weight:bold;';
+            btn.innerHTML = `<span>▶ Play ${ext === 'swf' ? 'Flash' : 'HTML5'}</span>`;
+
+            const downloadUrl = window.ApiClient.getUrl(`Items/${itemId}/Download`, { api_key: window.ApiClient.accessToken() });
+
+            btn.onclick = (e) => {
+                e.preventDefault();
+                if (ext === 'swf') launchFlash(downloadUrl, item.Name);
+                else if (ext === 'html') launchHtml(downloadUrl, item.Name);
+                else launchZipHtml(downloadUrl, item.Name);
+            };
+
+            detailContainer.prepend(btn);
+        } catch (e) {}
+    }
+
+    setInterval(checkCurrentItem, 800);
+})();
