@@ -128,8 +128,9 @@
 
             const downloadUrl = window.ApiClient.getUrl(`Items/${itemId}/Download`, { api_key: window.ApiClient.accessToken() });
 
-            btn.onclick = (e) => {
+         btn.onclick = (e) => {
                 e.preventDefault();
+                e.stopPropagation(); // Stops Jellyfin's media player from launching
                 if (ext === 'swf') launchFlash(downloadUrl, item.Name);
                 else if (ext === 'html') launchHtml(downloadUrl, item.Name);
                 else launchZipHtml(downloadUrl, item.Name);
