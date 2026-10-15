@@ -116,7 +116,7 @@
             if (!item || !item.Path) return;
 
             const ext = item.Path.split('.').pop().toLowerCase();
-            if (!['swf', 'html', 'zip', 'cbz'].includes(ext)) return;
+            if (!['swf', 'txt', 'html', 'zip', 'cbz'].includes(ext)) return;
 
             const detailContainer = document.querySelector('.mainDetailButtons:not(.hide)');
             if (!detailContainer || detailContainer.querySelector('.flashfin-btn')) return;
